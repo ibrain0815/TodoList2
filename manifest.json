@@ -1,0 +1,21 @@
+{
+    "name": "Premium Task Calendar",
+    "short_name": "TaskCal",
+    "description": "Premium Task Management with Real-time Sync",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#1a1a2e",
+    "theme_color": "#3a7bd5",
+    "icons": [
+        {
+            "src": "icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png"
+        },
+        {
+            "src": "icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png"
+        }
+    ]
+}
