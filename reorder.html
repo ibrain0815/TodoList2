@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>할 일 순서 변경</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; max-width: 520px; margin: 0 auto; padding: 16px; }
+    h1 { font-size: 1.25rem; margin-bottom: 12px; }
+    .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+    input[type="date"] { padding: 8px; font-size: 1rem; }
+    button { padding: 8px 14px; cursor: pointer; font-size: 0.95rem; border-radius: 6px; border: 1px solid #ccc; background: #f5f5f5; }
+    button.primary { background: #3a7bd5; color: #fff; border-color: #3a7bd5; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    ul { list-style: none; padding: 0; margin: 0; min-height: 80px; }
+    li { display: flex; align-items: center; gap: 6px; padding: 10px 12px; margin-bottom: 6px; background: #f9f9f9; border-radius: 8px; border: 1px solid #eee; user-select: none; -webkit-user-select: none; }
+    li.dragging { opacity: 0.5; background: #e3f2fd; border-color: #3a7bd5; }
+    li.drag-over { border-color: #3a7bd5; background: #e8f0fe; }
+    .drag-handle { cursor: grab; padding: 4px 6px; color: #666; font-size: 1.1rem; flex-shrink: 0; }
+    .drag-handle:active { cursor: grabbing; }
+    .order-btns { display: flex; flex-direction: column; gap: 2px; flex-shrink: 0; }
+    .order-btns button { padding: 2px 8px; font-size: 0.85rem; line-height: 1.2; }
+    .item-text { flex: 1; min-width: 0; }
+    .item-done { text-decoration: line-through; color: #888; }
+    .msg { margin-top: 12px; padding: 8px; border-radius: 6px; }
+    .msg.ok { background: #e8f5e9; color: #2e7d32; }
+    .msg.err { background: #ffebee; color: #c62828; }
+    .back { display: inline-block; margin-bottom: 12px; color: #3a7bd5; text-decoration: none; }
+    .hint { font-size: 0.85rem; color: #666; margin-bottom: 8px; }
+  </style>
+</head>
+<body>
+  <a class="back" href="index.html">← 메인으로</a>
+  <h1>할 일 순서 변경</h1>
+  <div class="toolbar">
+    <input type="date" id="date" />
+    <button type="button" id="btnLoad">불러오기</button>
+    <button type="button" id="btnSave" class="primary" disabled>순서 저장</button>
+  </div>
+  <p class="hint">드래그하거나 ↑↓ 버튼으로 순서를 바꾼 뒤 「순서 저장」을 누르세요.</p>
+  <ul id="list"></ul>
+  <div id="msg" class="msg" style="display:none;"></div>
+
+  <script>
+    (function () {
+      const API = 'api.php';
+      const dateEl = document.getElementById('date');
+      const listEl = document.getElementById('list');
+      const btnLoad = document.getElementById('btnLoad');
+      const btnSave = document.getElementById('btnSave');
+      const msgEl = document.getElementById('msg');
+
+      function today() {
+        const d = new Date();
+        return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+      }
+
+      function showMsg(text, isError) {
+        msgEl.textContent = text;
+        msgEl.className = 'msg ' + (isError ? 'err' : 'ok');
+        msgEl.style.display = 'block';
+        setTimeout(function () { msgEl.style.display = 'none'; }, 4000);
+      }
+
+      let items = [];
+      let draggedIndex = null;
+
+      dateEl.value = today();
+
+      function getDate() {
+        return dateEl.value || today();
+      }
+
+      function findLiIndex(node) {
+        var el = node;
+        while (el && el !== listEl) {
+          if (el.tagName === 'LI' && el.dataset.index !== undefined) return parseInt(el.dataset.index, 10);
+          el = el.parentNode;
+        }
+        return -1;
+      }
+
+      function clearDragOverClass() {
+        var lis = listEl.querySelectorAll('li.drag-over');
+        for (var i = 0; i < lis.length; i++) lis[i].classList.remove('drag-over');
+      }
+
+      // 리스트 컨테이너에 드래그/드롭 한 번만 등록
+      listEl.addEventListener('dragstart', function (e) {
+        var li = e.target;
+        while (li && li !== listEl && li.tagName !== 'LI') li = li.parentNode;
+        if (!li || li.tagName !== 'LI') return;
+        var idx = parseInt(li.dataset.index, 10);
+        if (isNaN(idx)) return;
+        draggedIndex = idx;
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', String(idx));
+        e.dataTransfer.dropEffect = 'move';
+        li.classList.add('dragging');
+      });
+
+      listEl.addEventListener('dragend', function (e) {
+        var li = e.target;
+        while (li && li !== listEl && li.tagName !== 'LI') li = li.parentNode;
+        if (li) li.classList.remove('dragging');
+        draggedIndex = null;
+        clearDragOverClass();
+      });
+
+      listEl.addEventListener('dragenter', function (e) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        var idx = findLiIndex(e.target);
+        if (idx >= 0) {
+          clearDragOverClass();
+          var lis = listEl.querySelectorAll('li');
+          if (lis[idx]) lis[idx].classList.add('drag-over');
+        }
+      });
+
+      listEl.addEventListener('dragover', function (e) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+      });
+
+      listEl.addEventListener('drop', function (e) {
+        e.preventDefault();
+        clearDragOverClass();
+        if (draggedIndex === null) return;
+        var dropEl = document.elementFromPoint(e.clientX, e.clientY);
+        var dropIdx = dropEl ? findLiIndex(dropEl) : -1;
+        if (dropIdx < 0 || dropIdx === draggedIndex) return;
+        moveItem(draggedIndex, dropIdx);
+        draggedIndex = null;
+      });
+
+      listEl.addEventListener('dragleave', function (e) {
+        if (!listEl.contains(e.relatedTarget)) clearDragOverClass();
+      });
+
+      function moveItem(from, to) {
+        var t = items[from];
+        items.splice(from, 1);
+        items.splice(to, 0, t);
+        render();
+      }
+
+      function moveUp(i) {
+        if (i <= 0) return;
+        moveItem(i, i - 1);
+      }
+
+      function moveDown(i) {
+        if (i >= items.length - 1) return;
+        moveItem(i, i + 1);
+      }
+
+      function escapeHtml(s) {
+        var div = document.createElement('div');
+        div.textContent = s;
+        return div.innerHTML;
+      }
+
+      function render() {
+        listEl.innerHTML = '';
+        items.forEach(function (item, i) {
+          var li = document.createElement('li');
+          li.dataset.index = String(i);
+          li.draggable = true;
+          li.setAttribute('role', 'button');
+          li.tabIndex = 0;
+          li.innerHTML =
+            '<span class="drag-handle" aria-label="드래그">⋮⋮</span>' +
+            '<div class="order-btns">' +
+              '<button type="button" class="btnUp" title="위로">↑</button>' +
+              '<button type="button" class="btnDown" title="아래로">↓</button>' +
+            '</div>' +
+            '<span class="item-text ' + (item.completed ? 'item-done' : '') + '">' + escapeHtml(item.text) + '</span>';
+
+          li.querySelector('.btnUp').onclick = function (ev) { ev.preventDefault(); ev.stopPropagation(); moveUp(i); };
+          li.querySelector('.btnDown').onclick = function (ev) { ev.preventDefault(); ev.stopPropagation(); moveDown(i); };
+
+          listEl.appendChild(li);
+        });
+        btnSave.disabled = items.length === 0;
+      }
+
+      btnLoad.addEventListener('click', function () {
+        btnLoad.disabled = true;
+        fetch(API + '?action=get&date=' + encodeURIComponent(getDate()))
+          .then(function (r) { return r.json(); })
+          .then(function (res) {
+            if (res.success && Array.isArray(res.data)) {
+              items = res.data.map(function (t) { return { id: t.id, text: t.text, completed: !!t.completed }; });
+              render();
+              showMsg('목록을 불러왔습니다.');
+            } else {
+              items = [];
+              render();
+              showMsg(res.message || '불러오기 실패', true);
+            }
+          })
+          .catch(function () { showMsg('연결 실패', true); })
+          .finally(function () { btnLoad.disabled = false; });
+      });
+
+      btnSave.addEventListener('click', function () {
+        if (items.length === 0) return;
+        btnSave.disabled = true;
+        fetch(API + '?action=save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ date: getDate(), todos: items })
+        })
+          .then(function (r) { return r.json(); })
+          .then(function (res) {
+            if (res.success) {
+              showMsg('순서가 저장되었습니다.');
+              if (res.data && res.data.length) items = res.data;
+              render();
+            } else {
+              showMsg(res.message || '저장 실패', true);
+            }
+          })
+          .catch(function () { showMsg('저장 연결 실패', true); })
+          .finally(function () { btnSave.disabled = false; });
+      });
+
+      btnLoad.click();
+    })();
+  </script>
+</body>
+</html>

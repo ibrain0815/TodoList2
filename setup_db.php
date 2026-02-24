@@ -1,8 +1,9 @@
 <?php
-$db_host = 'localhost';
-$db_name = 'soullatte';
-$db_user = 'soullatte';
-$db_pass = 'healingtime76!';
+$config = require __DIR__ . '/config.php';
+$db_host = $config['db_host'];
+$db_name = $config['db_name'];
+$db_user = $config['db_user'];
+$db_pass = $config['db_pass'];
 
 try {
     $pdo = new PDO("mysql:host=$db_host;charset=utf8mb4", $db_user, $db_pass);
@@ -10,16 +11,18 @@ try {
 
     // DB 생성
     $pdo->exec("CREATE DATABASE IF NOT EXISTS `$db_name` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
-    $pdo->exec("USE `$db_name` text");
+    $pdo->exec("USE `$db_name`");
 
-    // todos 테이블 생성
+    // todos 테이블 생성 (순서 유지를 위해 sort_order 포함)
     $pdo->exec("CREATE TABLE IF NOT EXISTS todos (
         id BIGINT PRIMARY KEY,
         todo_text TEXT NOT NULL,
         completed TINYINT(1) DEFAULT 0,
         todo_date DATE NOT NULL,
+        sort_order INT NOT NULL DEFAULT 0,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        INDEX idx_todo_date (todo_date)
+        INDEX idx_todo_date (todo_date),
+        INDEX idx_sort (todo_date, sort_order)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
     // recent_todos 테이블 생성
