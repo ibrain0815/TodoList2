@@ -14,6 +14,298 @@
 
 <body>
   <div id="root"></div>
+  <script>
+    // 기존 "통계 보기" 버튼 동작(리포트 팝업)은 그대로 두고,
+    // 리포트 팝업이 열렸을 때에만 팝업 안에 AI 인사이트 영역을 주입한다.
+    window.addEventListener('DOMContentLoaded', function () {
+      var aiInsightsArmed = false;
+      var aiInsightsAttached = false;
+
+      // 메인 페이지(index)에 API 키 입력 영역 추가 — 연결 후 통계 보기에서 바로 제언 확인
+      (function addMainPageKeyPanel() {
+        var panel = document.createElement('div');
+        panel.id = 'ai-key-panel';
+        panel.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:1000;padding:8px 12px;' +
+          'background:rgba(30,40,55,0.95);border-bottom:1px solid rgba(255,255,255,0.1);' +
+          'display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:0.8rem;';
+        panel.innerHTML = ''
+          + '<span style="color:rgba(255,255,255,0.9);white-space:nowrap;">Claude API 키 (1회 설정)</span>'
+          + '<span id="ai-key-input-wrap" style="display:flex;flex:1;min-width:0;max-width:280px;gap:6px;">'
+          + '  <input type="password" id="ai-key-input-main" placeholder="sk-..." '
+          + '    style="flex:1;min-width:0;padding:6px 10px;border-radius:6px;'
+          + '    border:1px solid rgba(255,255,255,0.2);background:rgba(0,0,0,0.3);color:#fff;outline:none;" />'
+          + '  <button type="button" id="ai-key-save-main" style="padding:6px 12px;border-radius:6px;'
+          + '    border:1px solid rgba(255,255,255,0.3);background:rgba(255,255,255,0.08);color:#fff;cursor:pointer;">키 저장</button>'
+          + '</span>'
+          + '<button type="button" id="ai-key-test-main" style="padding:6px 12px;border-radius:6px;'
+          + '  border:1px solid rgba(79,195,247,0.8);background:rgba(1,87,155,0.6);color:#fff;cursor:pointer;">연결 확인</button>'
+          + '<span id="ai-key-status-main" style="color:rgba(255,255,255,0.6);font-size:0.75rem;"></span>';
+        document.body.insertBefore(panel, document.body.firstChild);
+        document.body.style.paddingTop = '46px';
+
+        var keyInput = document.getElementById('ai-key-input-main');
+        var keyInputWrap = document.getElementById('ai-key-input-wrap');
+        var keySave = document.getElementById('ai-key-save-main');
+        var keyTest = document.getElementById('ai-key-test-main');
+        var statusEl = document.getElementById('ai-key-status-main');
+        function setStatus(txt, isErr) {
+          statusEl.textContent = txt || '';
+          statusEl.style.color = isErr ? '#ff8a80' : 'rgba(255,255,255,0.7)';
+        }
+        function setKeyPanelConnected(connected) {
+          if (keyInputWrap) keyInputWrap.style.display = connected ? 'none' : 'flex';
+          if (connected) {
+            keyInput.value = '';
+            setStatus('Claude API가 연결되어 있습니다.', false);
+          } else {
+            setStatus('', false);
+          }
+        }
+        fetch('api.php?action=checkClaudeKey')
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            if (d && d.success && d.data && d.data.configured) setKeyPanelConnected(true);
+          })
+          .catch(function () {});
+        keySave.addEventListener('click', function () {
+          var v = (keyInput.value || '').trim();
+          if (!v) { setStatus('키를 입력해 주세요.', true); return; }
+          keySave.disabled = true;
+          setStatus('저장 중...', false);
+          fetch('api.php?action=saveClaudeKey', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ apiKey: v })
+          })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+              if (d && d.success) {
+                setStatus('저장됨. 통계 보기에서 제언을 확인하세요.', false);
+                setKeyPanelConnected(true);
+              } else { setStatus((d && d.message) || '저장 실패', true); }
+            })
+            .catch(function () { setStatus('통신 오류', true); })
+            .finally(function () { keySave.disabled = false; });
+        });
+        keyTest.addEventListener('click', function () {
+          var v = (keyInput.value || '').trim();
+          keyTest.disabled = true;
+          setStatus('확인 중...', false);
+          fetch('api.php?action=testClaudeKey', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(v ? { apiKey: v } : {})
+          })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+              if (d && d.success) {
+                setStatus(d.message || '연결됨', false);
+                setKeyPanelConnected(true);
+              } else { setStatus((d && d.message) || '연결 실패', true); }
+            })
+            .catch(function () { setStatus('통신 오류', true); })
+            .finally(function () { keyTest.disabled = false; });
+        });
+      })();
+
+      function isReportModal(node) {
+        if (!node || node.nodeType !== 1 || node.id === 'root' || node === document.body) return false;
+        var text = (node.textContent || '').trim();
+        return text.indexOf('리포트') !== -1
+          && text.indexOf('이번 달 달성률') !== -1
+          && text.indexOf('일간 달성률 추이') !== -1
+          && text.indexOf('남은 할 일 목록') !== -1;
+      }
+
+      function scanAndEnhance() {
+        if (!aiInsightsArmed || aiInsightsAttached) return;
+
+        var allDivs = document.querySelectorAll('div');
+        var candidates = [];
+        for (var i = 0; i < allDivs.length; i++) {
+          var node = allDivs[i];
+          if (node.parentElement === document.body) continue;
+          if (node.getAttribute('data-ai-insights-attached') === '1') continue;
+          if (isReportModal(node)) candidates.push(node);
+        }
+        // 팝업창 안쪽에 붙이기 위해, 리포트 내용을 가진 div 중 가장 안쪽(innermost) 노드만 사용
+        var modalRoot = null;
+        for (var j = 0; j < candidates.length; j++) {
+          var c = candidates[j];
+          var hasDescendantMatch = false;
+          var descendants = c.querySelectorAll('div');
+          for (var k = 0; k < descendants.length; k++) {
+            if (candidates.indexOf(descendants[k]) !== -1) {
+              hasDescendantMatch = true;
+              break;
+            }
+          }
+          if (!hasDescendantMatch) {
+            modalRoot = c;
+            break;
+          }
+        }
+        if (!modalRoot) modalRoot = candidates[0];
+        if (!modalRoot) return;
+
+        attachAiBox(modalRoot);
+        modalRoot.setAttribute('data-ai-insights-attached', '1');
+        aiInsightsAttached = true;
+      }
+
+      function attachAiBox(modalRoot) {
+        var box = document.createElement('div');
+        box.className = 'ai-insights-root';
+        box.style.marginTop = '16px';
+        box.style.padding = '12px';
+        box.style.borderRadius = '10px';
+        box.style.border = '1px solid rgba(255,255,255,0.08)';
+        box.style.background = 'rgba(0,0,0,0.2)';
+        box.style.backdropFilter = 'blur(6px)';
+        box.style.color = 'rgba(255,255,255,0.9)';
+
+        box.innerHTML = ''
+          + '<div style="margin-bottom:6px;">'
+          + '  <div style="font-size:0.95rem;font-weight:600;display:flex;align-items:center;gap:6px;">'
+          + '    <span style="font-size:1rem;">✨</span>'
+          + '    <span>AI 기반 남은 할 일 제언</span>'
+          + '  </div>'
+          + '</div>'
+          + '<p style="margin:0 0 8px 0;font-size:0.8rem;color:rgba(255,255,255,0.7);">'
+          + '메인 화면에서 API 키를 연결한 후, 통계 보기 시 자동으로 제언을 불러옵니다.'
+          + '</p>'
+          + '<div class="ai-insights-message"'
+          + '     style="display:none;margin-top:6px;font-size:0.8rem;padding:6px 8px;border-radius:6px;'
+          + '            background:rgba(3,155,229,0.1);color:#81d4fa;"></div>'
+          + '<div class="ai-insights-result" style="display:none;margin-top:8px;font-size:0.82rem;line-height:1.5;">'
+          + '  <div style="margin-bottom:4px;"><strong>요약</strong><br><span data-ai="summary"></span></div>'
+          + '  <div style="margin-bottom:4px;"><strong>의미론적 패턴</strong><br><span data-ai="semantic"></span></div>'
+          + '  <div style="margin-bottom:4px;"><strong>인지 부하 유형</strong><br><span data-ai="cognitive"></span></div>'
+          + '  <div style="margin-bottom:4px;"><strong>병목 분석</strong><br><span data-ai="bottleneck"></span></div>'
+          + '  <div style="margin-bottom:4px;"><strong>개선 대책 1</strong><br><span data-ai="plan1"></span></div>'
+          + '  <div style="margin-bottom:4px;"><strong>개선 대책 2</strong><br><span data-ai="plan2"></span></div>'
+          + '  <div style="margin-bottom:0;"><strong>동기부여 문구</strong><br><span data-ai="quote"></span></div>'
+          + '</div>'
+          + '<div class="ai-insights-footer" style="margin-top:16px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.1);'
+          + '  display:flex;gap:8px;justify-content:flex-end;align-items:center;">'
+          + '  <button type="button" class="ai-insights-retry" style="display:none;padding:6px 14px;border-radius:6px;'
+          + '    border:1px solid rgba(79,195,247,0.6);background:rgba(1,87,155,0.4);'
+          + '    color:#81d4fa;font-size:0.8rem;cursor:pointer;">다시 시도</button>'
+          + '  <span class="ai-insights-confirm-slot"></span>'
+          + '</div>';
+
+        // 팝업 전체(윗부분~맨 아래 버튼)가 한 스크롤로 보이도록: 모달 콘텐츠에 max-height + overflow-y 적용
+        var scrollHost = modalRoot;
+        var hostStyle = scrollHost.style;
+        hostStyle.maxHeight = '90vh';
+        hostStyle.overflowY = 'auto';
+        hostStyle.overflowX = 'hidden';
+        scrollHost.appendChild(box);
+
+        // 알림 테스트 버튼 제거, 확인 버튼은 맨 아래(푸터)로 이동
+        (function moveReportButtons() {
+          var confirmSlot = box.querySelector('.ai-insights-confirm-slot');
+          function walk(parent, fn) {
+            var nodes = parent.querySelectorAll('button, a[role="button"], [role="button"]');
+            for (var i = 0; i < nodes.length; i++) {
+              if (box.contains(nodes[i])) continue;
+              fn(nodes[i]);
+            }
+          }
+          walk(modalRoot, function (el) {
+            var txt = (el.textContent || '').trim();
+            if (txt.indexOf('알림 테스트') !== -1) {
+              el.parentNode && el.parentNode.removeChild(el);
+            } else if (txt.indexOf('확인') !== -1 && confirmSlot && confirmSlot.childNodes.length === 0) {
+              el.parentNode && el.parentNode.removeChild(el);
+              confirmSlot.appendChild(el);
+            }
+          });
+        })();
+
+        var msg = box.querySelector('.ai-insights-message');
+        var retryBtn = box.querySelector('.ai-insights-retry');
+        var res = box.querySelector('.ai-insights-result');
+
+        function showMsg(text, isError) {
+          if (!msg) return;
+          msg.textContent = text;
+          msg.style.display = 'block';
+          msg.style.background = isError
+            ? 'rgba(239,83,80,0.15)'
+            : 'rgba(3,155,229,0.15)';
+          msg.style.color = isError ? '#ff8a80' : '#81d4fa';
+          if (retryBtn) retryBtn.style.display = isError ? 'inline-block' : 'none';
+        }
+
+        function runInsights() {
+          showMsg('제언을 불러오는 중입니다...', false);
+          if (res) res.style.display = 'none';
+          fetch('api.php?action=generateInsights', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+          })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+              if (!data || !data.success) {
+                showMsg((data && data.message) || '제언을 불러오지 못했습니다. 아래 "다시 시도"를 눌러 주세요.', true);
+                return;
+              }
+              showMsg('제언을 불러왔습니다.', false);
+              if (!res) return;
+              var stored = data.data && data.data.stored ? data.data.stored : {};
+              function norm(s) {
+                return (s || '').replace(/\\\\n/g, '\\n').replace(/\\n/g, '\\n');
+              }
+              res.querySelector('[data-ai="summary"]').textContent   = norm(stored.summary_text);
+              res.querySelector('[data-ai="semantic"]').textContent  = norm(stored.semantic_pattern);
+              res.querySelector('[data-ai="cognitive"]').textContent = norm(stored.cognitive_load_type);
+              res.querySelector('[data-ai="bottleneck"]').textContent= norm(stored.bottleneck_analysis);
+              res.querySelector('[data-ai="plan1"]').textContent     = norm(stored.action_plan_1);
+              res.querySelector('[data-ai="plan2"]').textContent     = norm(stored.action_plan_2);
+              res.querySelector('[data-ai="quote"]').textContent     = norm(stored.motivation_quote);
+              res.style.display = 'block';
+            })
+            .catch(function () {
+              showMsg('서버 통신에 실패했습니다.', true);
+            });
+        }
+
+        if (retryBtn) {
+          retryBtn.addEventListener('click', function () { runInsights(); });
+        }
+        runInsights();
+      }
+
+      // "통계 보기" 버튼을 눌렀을 때만 AI 박스를 활성화
+      document.body.addEventListener('click', function (e) {
+        var el = e.target;
+        while (el && el !== document.body) {
+          var role = el.getAttribute && el.getAttribute('role');
+          if (el.tagName === 'BUTTON' || el.tagName === 'A' || role === 'button') {
+            var text = (el.textContent || '').trim();
+            if (text.indexOf('통계 보기') !== -1) {
+              aiInsightsArmed = true;
+              aiInsightsAttached = false;
+              // 팝업 DOM이 그려진 뒤에 스캔
+              setTimeout(scanAndEnhance, 80);
+              break;
+            }
+          }
+          el = el.parentElement;
+        }
+      }, true);
+
+      // 모달이 열릴 때마다 감지
+      var observer = new MutationObserver(function () {
+        scanAndEnhance();
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+      // 초기 스캔
+      scanAndEnhance();
+    });
+  </script>
 </body>
 
 </html>

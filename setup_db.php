@@ -32,6 +32,22 @@ try {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
+    // 생산성 인사이트 저장 테이블 생성
+    $pdo->exec("CREATE TABLE IF NOT EXISTS user_productivity_insights (
+        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        analysis_date_start DATE NULL,
+        analysis_date_end   DATE NULL,
+        summary_text        TEXT NOT NULL,
+        semantic_pattern    TEXT NOT NULL,
+        cognitive_load_type TEXT NOT NULL,
+        bottleneck_analysis TEXT NOT NULL,
+        action_plan_1       TEXT NOT NULL,
+        action_plan_2       TEXT NOT NULL,
+        motivation_quote    TEXT NOT NULL,
+        created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_upi_created_at (created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
     echo "데이터베이스 및 테이블 생성 완료!\n";
 
 } catch (PDOException $e) {
