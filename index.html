@@ -61,10 +61,14 @@
             setStatus('', false);
           }
         }
+        // 페이지 로드 시에는 입력창을 숨기지 않음. (저장된 키가 무효할 수 있어 연결 실패 시에도 입력창이 보여야 함)
+        // '키 저장' 또는 '연결 확인' 성공 시에만 입력창 숨김
         fetch('api.php?action=checkClaudeKey')
           .then(function (r) { return r.json(); })
           .then(function (d) {
-            if (d && d.success && d.data && d.data.configured) setKeyPanelConnected(true);
+            if (d && d.success && d.data && d.data.configured) {
+              setStatus('저장된 키가 있습니다. 연결 확인을 눌러 검증하세요.', false);
+            }
           })
           .catch(function () {});
         keySave.addEventListener('click', function () {
